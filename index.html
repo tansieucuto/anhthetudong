@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ảnh Thẻ Tự Động — Tách nền, cắt mặt, ghép giấy in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#10131A;
+  --muted:#5B6472;
+  --line:#C9D0DB;
+  --bg:#E6EAF1;
+  --paper:#FFFFFF;
+  --blue:#1667C8;     /* xanh phông ảnh thẻ */
+  --red:#D8232A;      /* nút hành động chính */
+  --green:#137A4B;
+  --radius:14px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  background:var(--bg); color:var(--ink);
+  font-size:19px; line-height:1.5;
+  -webkit-text-size-adjust:100%;
+}
+.wrap{max-width:840px;margin:0 auto;padding:20px 16px 80px}
+
+header.top{
+  background:var(--ink); color:#fff; border-radius:var(--radius);
+  padding:22px 24px; margin-bottom:22px;
+}
+header.top h1{margin:0;font-size:30px;font-weight:800;letter-spacing:-.5px}
+header.top p{margin:6px 0 0;color:#B9C2D0;font-size:17px}
+
+.card{
+  background:var(--paper); border:2px solid var(--line); border-radius:var(--radius);
+  padding:20px; margin-bottom:18px;
+}
+.card h2{
+  display:flex; align-items:center; gap:12px;
+  margin:0 0 14px; font-size:22px; font-weight:800;
+}
+.num{
+  flex:none; width:40px;height:40px;border-radius:50%;
+  background:var(--ink); color:#fff; font-size:20px; font-weight:800;
+  display:flex;align-items:center;justify-content:center;
+}
+.hint{color:var(--muted); font-size:16px; margin:-6px 0 14px}
+
+/* ---- Vùng chọn ảnh ---- */
+.drop{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  min-height:180px; border:4px dashed var(--line); border-radius:var(--radius);
+  background:#F7F9FC; cursor:pointer; text-align:center; padding:20px;
+  font-size:22px; font-weight:800; color:var(--ink);
+}
+.drop:hover,.drop.over{border-color:var(--blue); background:#EEF5FF}
+.drop span.sub{font-size:16px;font-weight:400;color:var(--muted)}
+#thumbBox{display:none;margin-top:14px;text-align:center}
+#thumb{max-width:100%;max-height:280px;border-radius:10px;border:2px solid var(--line)}
+
+/* ---- Các ô lựa chọn ---- */
+.opts{display:flex;flex-wrap:wrap;gap:12px}
+.opt{position:relative}
+.opt input{position:absolute;opacity:0;width:0;height:0}
+.opt span.box{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  min-width:132px; min-height:104px; padding:14px 16px;
+  border:3px solid var(--line); border-radius:12px; background:#fff;
+  font-size:19px; font-weight:600; cursor:pointer; text-align:center;
+}
+.opt input:checked + span.box{border-color:var(--blue); background:#EAF2FE; box-shadow:inset 0 0 0 2px var(--blue)}
+.opt input:focus-visible + span.box{outline:3px solid var(--ink); outline-offset:3px}
+.opt small{font-weight:400;color:var(--muted);font-size:15px}
+/* hình chữ nhật vẽ đúng tỉ lệ thật của khổ ảnh — dấu hiệu nhận biết bằng mắt */
+.ratio{background:var(--blue);border-radius:2px;flex:none}
+.swatch{width:42px;height:42px;border-radius:8px;border:2px solid var(--line)}
+
+/* ---- Số lượng ---- */
+.count{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.count button{
+  width:76px;height:76px;border-radius:14px;border:3px solid var(--ink);
+  background:#fff;font-size:38px;font-weight:800;line-height:1;cursor:pointer;color:var(--ink)
+}
+.count button:active{background:#EAF2FE}
+#qty{
+  width:120px;height:76px;text-align:center;font-size:34px;font-weight:800;
+  border:3px solid var(--line);border-radius:14px;font-family:inherit;color:var(--ink)
+}
+.count .cap{color:var(--muted);font-size:16px}
+
+/* ---- Nút chính ---- */
+.cta{
+  width:100%; min-height:88px; border:none; border-radius:var(--radius);
+  background:var(--red); color:#fff; font-family:inherit;
+  font-size:28px; font-weight:800; letter-spacing:.5px; cursor:pointer;
+}
+.cta:hover{filter:brightness(1.08)}
+.cta:disabled{background:#9AA3B2;cursor:not-allowed}
+.cta.alt{background:var(--green)}
+.cta.dark{background:var(--ink)}
+.cta:focus-visible{outline:4px solid var(--ink);outline-offset:3px}
+
+#status{
+  display:none; margin-top:16px; padding:16px 18px; border-radius:12px;
+  background:#FFF6DA; border:2px solid #E7C64B; font-size:19px; font-weight:600;
+}
+#status.err{background:#FDE8E8;border-color:var(--red);color:#8A1219}
+#status.ok{background:#E7F5EE;border-color:var(--green);color:#0C5334}
+
+/* ---- Kết quả ---- */
+#result{display:none}
+.previewRow{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start}
+.previewRow .col{flex:1 1 240px;min-width:220px}
+.previewRow h3{margin:0 0 10px;font-size:18px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+#cropPrev{max-width:210px;width:100%;border:2px solid var(--line);border-radius:8px;display:block}
+#sheetPrev{max-width:100%;border:2px solid var(--line);border-radius:8px;display:block;background:#fff}
+.adjust{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:14px;max-width:260px}
+.adjust button{
+  min-height:62px;border:3px solid var(--line);border-radius:12px;background:#fff;
+  font-family:inherit;font-size:17px;font-weight:600;cursor:pointer;color:var(--ink)
+}
+.adjust button:active{background:#EAF2FE}
+.chk{display:flex;align-items:center;gap:12px;margin-top:16px;font-size:17px;cursor:pointer}
+.chk input{width:28px;height:28px}
+.actions{display:flex;flex-direction:column;gap:12px;margin-top:20px}
+footer{color:var(--muted);font-size:15px;text-align:center;margin-top:26px;line-height:1.7}
+@media (max-width:520px){
+  body{font-size:18px}
+  header.top h1{font-size:24px}
+  .opt span.box{min-width:104px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>ẢNH THẺ</h1>
+</header>
+
+<!-- 1 -->
+<section class="card">
+  <h2><span class="num">1</span> Ảnh gốc</h2>
+  <label class="drop" id="drop" for="file">📷 CHỌN ẢNH</label>
+  <input type="file" id="file" accept="image/*" hidden>
+  <div id="thumbBox"><img id="thumb" alt="Ảnh vừa chọn"></div>
+</section>
+
+<!-- 2 -->
+<section class="card">
+  <h2><span class="num">2</span> Cỡ ảnh</h2>
+  <div class="opts" id="sizeOpts"></div>
+</section>
+
+<!-- 3 -->
+<section class="card">
+  <h2><span class="num">3</span> Giấy in</h2>
+  <div class="opts" id="paperOpts"></div>
+</section>
+
+<!-- 4 -->
+<section class="card">
+  <h2><span class="num">4</span> Cách nhau</h2>
+  <div class="opts" id="gapOpts"></div>
+</section>
+
+<!-- 5 -->
+<section class="card">
+  <h2><span class="num">5</span> Số tấm</h2>
+  <div class="count">
+    <button type="button" id="minus" aria-label="Bớt một tấm">−</button>
+    <input type="number" id="qty" value="8" min="1" max="200" inputmode="numeric">
+    <button type="button" id="plus" aria-label="Thêm một tấm">+</button>
+    <span class="cap" id="capNote"></span>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="card">
+  <h2><span class="num">6</span> Nền</h2>
+  <div class="opts" id="bgOpts"></div>
+</section>
+
+<button class="cta" id="go">TẠO ẢNH THẺ</button>
+<div id="status" role="status" aria-live="polite"></div>
+
+<!-- Kết quả -->
+<section class="card" id="result">
+  <h2><span class="num">7</span> Kết quả</h2>
+  <div class="previewRow">
+    <div class="col">
+      <h3>1 tấm</h3>
+      <canvas id="cropPrev"></canvas>
+      <div class="adjust">
+        <button type="button" data-adj="zoomout">🔍−</button>
+        <button type="button" data-adj="zoomin">🔍+</button>
+        <button type="button" data-adj="up">▲</button>
+        <button type="button" data-adj="down">▼</button>
+        <button type="button" data-adj="left">◀</button>
+        <button type="button" data-adj="right">▶</button>
+      </div>
+    </div>
+    <div class="col">
+      <h3>Cả tờ</h3>
+      <canvas id="sheetPrev"></canvas>
+      <label class="chk"><input type="checkbox" id="guides" checked> Đường cắt</label>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="cta alt" id="dlSheet">TẢI JPG</button>
+    <button class="cta dark" id="print">IN</button>
+    <button class="cta dark" id="dlOne" style="background:#fff;color:var(--ink);border:3px solid var(--ink)">1 tấm cho Corel (300 DPI)</button>
+  </div>
+</section>
+
+<footer>In ở <b>100% / kích thước thật</b>.</footer>
+</div>
+
+<script>
+/* =========================================================
+   CẤU HÌNH
+   ========================================================= */
+const DPI = 300;                      // độ phân giải file xuất
+const cm2px = cm => Math.round(cm / 2.54 * DPI);
+
+const SIZES = [
+  {id:'2x3',  w:2,   h:3,   label:'2 × 3 cm', note:'Hồ sơ, sơ yếu LL'},
+  {id:'3x4',  w:3,   h:4,   label:'3 × 4 cm', note:'Thông dụng nhất'},
+  {id:'3545', w:3.5, h:4.5, label:'3,5 × 4,5 cm', note:'Hộ chiếu, visa'},
+  {id:'4x6',  w:4,   h:6,   label:'4 × 6 cm', note:'Bằng lái, bằng cấp'},
+  {id:'5x5',  w:5,   h:5,   label:'5 × 5 cm', note:'Visa Mỹ'}
+];
+const PAPERS = [
+  {id:'a4',    w:21,  h:29.7, label:'A4', note:'21 × 29,7 cm'},
+  {id:'1318',  w:13,  h:18,   label:'13 × 18 cm', note:'Giấy ảnh 5R'},
+  {id:'1015',  w:10,  h:15,   label:'10 × 15 cm', note:'Giấy ảnh 4R'},
+  {id:'1520',  w:15,  h:20,   label:'15 × 20 cm', note:'Giấy ảnh 6R'}
+];
+const BGS = [
+  {id:'keep',  label:'Giữ nguyên nền', color:null},
+  {id:'white', label:'Nền trắng',      color:'#FFFFFF'},
+  {id:'blue',  label:'Nền xanh',       color:'#1667C8'},
+  {id:'lblue', label:'Xanh nhạt',      color:'#8FC1E8'},
+  {id:'gray',  label:'Nền xám',        color:'#D9D9D9'}
+];
+
+const GAPS = [
+  {id:'0',  cm:0,    label:'Sát nhau'},
+  {id:'1',  cm:0.1,  label:'1 mm'},
+  {id:'2',  cm:0.2,  label:'2 mm'},
+  {id:'3',  cm:0.3,  label:'3 mm'}
+];
+const MARGIN_CM = 0.2;    // lề giấy, để sát mép
+
+/* =========================================================
+   TRẠNG THÁI
+   ========================================================= */
+const S = {
+  file:null,
+  srcCanvas:null,     // ảnh gốc đã thu nhỏ vừa phải
+  workCanvas:null,    // ảnh đã thay nền (hoặc = srcCanvas)
+  faceBox:null,       // {x,y,width,height}
+  zoom:1, dx:0, dy:0, // tinh chỉnh khung cắt
+  size:SIZES[1], paper:PAPERS[0], bg:BGS[0], gap:GAPS[0],
+  cropCanvas:null, sheetCanvas:null
+};
+
+/* =========================================================
+   DỰNG CÁC Ô LỰA CHỌN
+   ========================================================= */
+const $ = s => document.querySelector(s);
+function radioGroup(host, items, name, checkedId, render, onPick){
+  host.innerHTML = '';
+  items.forEach(it=>{
+    const l = document.createElement('label'); l.className='opt';
+    l.innerHTML = `<input type="radio" name="${name}" value="${it.id}" ${it.id===checkedId?'checked':''}>
+      <span class="box">${render(it)}</span>`;
+    l.querySelector('input').addEventListener('change',()=>onPick(it));
+    host.appendChild(l);
+  });
+}
+radioGroup($('#sizeOpts'), SIZES, 'size', S.size.id, it=>{
+  const h = 46, w = Math.round(h * it.w / it.h);
+  return `<i class="ratio" style="width:${w}px;height:${h}px"></i>
+          <b>${it.label}</b>`;
+}, it=>{ S.size=it; updateCap(); rerender(); });
+
+radioGroup($('#paperOpts'), PAPERS, 'paper', S.paper.id, it=>{
+  const m = 46, k = m/Math.max(it.w,it.h);
+  return `<i class="ratio" style="width:${Math.round(it.w*k)}px;height:${Math.round(it.h*k)}px;background:#B9C2D0;border:2px solid #7A8494"></i>
+          <b>${it.label}</b>`;
+}, it=>{ S.paper=it; updateCap(); rerender(); });
+
+radioGroup($('#gapOpts'), GAPS, 'gap', S.gap.id, it=>`<b>${it.label}</b>`,
+  it=>{ S.gap=it; updateCap(); rerender(); });
+
+radioGroup($('#bgOpts'), BGS, 'bg', S.bg.id, it=>{
+  const sw = it.color
+    ? `<i class="swatch" style="background:${it.color}"></i>`
+    : `<i class="swatch" style="background:repeating-conic-gradient(#ddd 0 25%,#fff 0 50%) 0/16px 16px"></i>`;
+  return `${sw}<b>${it.label}</b>`;
+}, it=>{ S.bg=it; });
+
+/* =========================================================
+   THÔNG BÁO
+   ========================================================= */
+function say(msg, kind){
+  const el = $('#status');
+  el.style.display = msg ? 'block' : 'none';
+  el.className = kind || '';
+  el.textContent = msg || '';
+}
+
+/* =========================================================
+   SỐ LƯỢNG + SỨC CHỨA TỜ GIẤY
+   ========================================================= */
+function capacity(){
+  const g = S.gap.cm;
+  const usableW = S.paper.w - 2*MARGIN_CM, usableH = S.paper.h - 2*MARGIN_CM;
+  const cols = Math.floor((usableW + g) / (S.size.w + g));
+  const rows = Math.floor((usableH + g) / (S.size.h + g));
+  return {cols:Math.max(cols,0), rows:Math.max(rows,0), total:Math.max(cols,0)*Math.max(rows,0)};
+}
+// Phần giấy còn nguyên phía dưới sau khi cắt hết ảnh
+function leftoverCm(n){
+  const c = capacity();
+  if(!c.cols) return 0;
+  const rows = Math.ceil(Math.min(n, c.total) / c.cols);
+  const used = MARGIN_CM + rows*S.size.h + (rows-1)*S.gap.cm;
+  return Math.max(0, S.paper.h - used);
+}
+function updateCap(){
+  const c = capacity();
+  $('#capNote').textContent = c.total
+    ? `Vừa ${c.total} tấm/tờ`
+    : `Không vừa tờ ${S.paper.label}`;
+}
+const qty = $('#qty');
+$('#plus').onclick  = ()=>{ qty.value = Math.min(200, (+qty.value||1)+1); rerender(); };
+$('#minus').onclick = ()=>{ qty.value = Math.max(1,   (+qty.value||1)-1); rerender(); };
+qty.addEventListener('change', rerender);
+updateCap();
+
+/* =========================================================
+   NHẬN ẢNH
+   ========================================================= */
+const drop = $('#drop');
+$('#file').addEventListener('change', e => { if(e.target.files[0]) takeFile(e.target.files[0]); });
+['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop', e=>{ const f=e.dataTransfer.files[0]; if(f && f.type.startsWith('image/')) takeFile(f); });
+
+async function takeFile(f){
+  S.file = f; S.faceBox=null; S.workCanvas=null; S.zoom=1; S.dx=0; S.dy=0;
+  $('#result').style.display='none';
+  say('');
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = ()=>{
+    const MAX = 1800;
+    const k = Math.min(1, MAX/Math.max(img.width,img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width*k); c.height = Math.round(img.height*k);
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+    S.srcCanvas = c;
+    $('#thumb').src = c.toDataURL('image/jpeg',0.85);
+    $('#thumbBox').style.display='block';
+    drop.textContent = '📷 ĐỔI ẢNH';
+    URL.revokeObjectURL(url);
+  };
+  img.onerror = ()=> say('Không đọc được tệp này.', 'err');
+  img.src = url;
+}
+
+/* =========================================================
+   TÌM KHUÔN MẶT (face-api.js qua CDN)
+   ========================================================= */
+const FACEAPI_JS = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
+const WEIGHTS    = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
+let faceReady = null;
+
+async function initFace(){
+  if(faceReady) return faceReady;
+  faceReady = (async()=>{
+    if(!window.faceapi) await loadScript(FACEAPI_JS);
+    await faceapi.nets.tinyFaceDetector.loadFromUri(WEIGHTS);
+  })();
+  return faceReady;
+}
+async function detectFace(canvas){
+  try{
+    await initFace();
+    for(const size of [512, 320, 608]){
+      const d = await faceapi.detectSingleFace(canvas,
+        new faceapi.TinyFaceDetectorOptions({inputSize:size, scoreThreshold:0.3}));
+      if(d) return {x:d.box.x, y:d.box.y, width:d.box.width, height:d.box.height};
+    }
+    return null;
+  }catch(e){ console.warn('face-api:', e); return null; }
+}
+
+/* =========================================================
+   TÁCH NỀN (@imgly/background-removal qua CDN)
+   ========================================================= */
+/* Hai bộ máy tách nền, thử lần lượt:
+   1) MediaPipe Selfie Segmentation — ~6 MB, chạy vài giây, đủ dùng cho ảnh thẻ.
+   2) @imgly/background-removal — sắc nét hơn nhưng phải tải ~80 MB model từ
+      staticimgly.com; mạng nào chặn tên miền đó là hỏng, nên để làm dự phòng. */
+
+const MP_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747';
+let mpSeg = null;
+
+function loadScript(src){
+  return new Promise((ok,no)=>{
+    const s=document.createElement('script'); s.src=src; s.crossOrigin='anonymous';
+    s.onload=ok; s.onerror=()=>no(new Error('Không tải được '+src)); document.head.appendChild(s);
+  });
+}
+
+async function getMediaPipe(){
+  if(mpSeg) return mpSeg;
+  if(!window.SelfieSegmentation) await loadScript(MP_BASE + '/selfie_segmentation.js');
+  const seg = new SelfieSegmentation({locateFile:f => MP_BASE + '/' + f});
+  seg.setOptions({modelSelection:1});          // 1 = model chính xác hơn
+  await seg.initialize();
+  mpSeg = seg; return seg;
+}
+
+/* Mặt nạ của MediaPipe hơi mềm ở rìa tóc → siết ngưỡng cho gọn,
+   rồi làm mượt lại 1 chút để không bị răng cưa. */
+function refineMask(maskData, w, h){
+  const a = maskData;
+  for(let i=0;i<a.length;i+=4){
+    let v = a[i];                       // kênh đỏ = độ tin cậy
+    v = (v-118) * 3.2 + 128;            // tăng tương phản quanh ngưỡng
+    a[i+3] = v<0 ? 0 : v>255 ? 255 : v;
+  }
+  return maskData;
+}
+
+async function cutWithMediaPipe(srcCanvas){
+  const seg = await getMediaPipe();
+  const res = await new Promise((ok,no)=>{
+    const t = setTimeout(()=>no(new Error('MediaPipe quá lâu')), 45000);
+    seg.onResults(r=>{ clearTimeout(t); ok(r); });
+    seg.send({image:srcCanvas}).catch(no);
+  });
+  const w = srcCanvas.width, h = srcCanvas.height;
+
+  const m = document.createElement('canvas'); m.width=w; m.height=h;
+  const mg = m.getContext('2d', {willReadFrequently:true});
+  mg.drawImage(res.segmentationMask, 0, 0, w, h);
+  const md = mg.getImageData(0,0,w,h);
+  refineMask(md.data, w, h);
+  mg.putImageData(md, 0, 0);
+
+  const out = document.createElement('canvas'); out.width=w; out.height=h;
+  const g = out.getContext('2d');
+  g.drawImage(srcCanvas, 0, 0);
+  g.globalCompositeOperation = 'destination-in';
+  g.drawImage(m, 0, 0);
+  g.globalCompositeOperation = 'source-over';
+  return out;                            // PNG trong suốt phần nền
+}
+
+const IMGLY_VER = '1.7.0';
+let rbFn = null;
+async function cutWithImgly(srcCanvas, onProg){
+  if(!rbFn){
+    const mod = await import(`https://cdn.jsdelivr.net/npm/@imgly/background-removal@${IMGLY_VER}/dist/index.mjs`);
+    rbFn = mod.removeBackground || (mod.default && mod.default.removeBackground);
+    if(!rbFn) throw new Error('Thư viện lỗi');
+  }
+  const srcBlob = await new Promise(r=>srcCanvas.toBlob(r,'image/png'));
+  const cut = await rbFn(srcBlob, {
+    output:{format:'image/png'},
+    progress:(k,c,t)=>onProg && t && onProg(c/t)
+  });
+  const bmp = await createImageBitmap(cut);
+  const out = document.createElement('canvas');
+  out.width = srcCanvas.width; out.height = srcCanvas.height;
+  out.getContext('2d').drawImage(bmp,0,0,out.width,out.height);
+  return out;
+}
+
+async function replaceBackground(srcCanvas, color, onStep){
+  let cut = null, err1 = null;
+  try{
+    onStep && onStep('Đang tách nền…');
+    cut = await cutWithMediaPipe(srcCanvas);
+  }catch(e){
+    err1 = e; console.warn('MediaPipe:', e);
+    onStep && onStep('Đang thử cách khác, tải dữ liệu lâu hơn…');
+    cut = await cutWithImgly(srcCanvas, p => onStep && onStep(`Đang tách nền… ${Math.round(p*100)}%`));
+  }
+  const out = document.createElement('canvas');
+  out.width = srcCanvas.width; out.height = srcCanvas.height;
+  const g = out.getContext('2d');
+  g.fillStyle = color; g.fillRect(0,0,out.width,out.height);
+  g.drawImage(cut,0,0);
+  return out;
+}
+
+/* =========================================================
+   TÍNH KHUNG CẮT & CẮT ẢNH
+   ========================================================= */
+function fallbackBox(w,h){ return {x:w*0.29, y:h*0.16, width:w*0.42, height:h*0.30}; }
+
+function cropPhoto(){
+  const src = S.workCanvas || S.srcCanvas;
+  const iw = src.width, ih = src.height;
+  const box = S.faceBox || fallbackBox(iw,ih);
+  const aspect = S.size.w / S.size.h;
+
+  // ước lượng cả đầu (tóc + cằm) từ khung mặt
+  const headTop = box.y - box.height*0.45;
+  const chin    = box.y + box.height*1.05;
+  const headH   = chin - headTop;
+
+  let ch = (headH / 0.68) * S.zoom;      // đầu chiếm ~68% chiều cao ảnh thẻ
+  let cw = ch * aspect;
+  let cx = box.x + box.width/2 + S.dx*cw;
+  let cy = headTop - ch*0.10 + S.dy*ch;  // chừa ~10% khoảng trống trên đỉnh đầu
+  let x  = cx - cw/2;
+
+  // dịch vào trong ảnh nếu còn dư địa
+  if(cw <= iw) x = Math.max(0, Math.min(iw-cw, x));
+  if(ch <= ih) cy = Math.max(0, Math.min(ih-ch, cy));
+
+  const outW = cm2px(S.size.w), outH = cm2px(S.size.h);
+  const c = document.createElement('canvas');
+  c.width = outW; c.height = outH;
+  const g = c.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.fillStyle = S.bg.color || '#FFFFFF';
+  g.fillRect(0,0,outW,outH);
+  g.drawImage(src, x, cy, cw, ch, 0, 0, outW, outH);
+  S.cropCanvas = c;
+  return c;
+}
+
+/* =========================================================
+   GHÉP TỜ GIẤY IN
+   ========================================================= */
+function buildSheet(){
+  const pw = cm2px(S.paper.w), ph = cm2px(S.paper.h);
+  const iw = cm2px(S.size.w),  ih = cm2px(S.size.h);
+  const gap = cm2px(S.gap.cm), mg = cm2px(MARGIN_CM);
+  const cap = capacity();
+
+  const sheet = document.createElement('canvas');
+  sheet.width = pw; sheet.height = ph;
+  const g = sheet.getContext('2d');
+  g.fillStyle = '#FFFFFF'; g.fillRect(0,0,pw,ph);   // viền trắng để cắt
+
+  const want = Math.max(1, Math.min(200, +qty.value||1));
+  const n = Math.min(want, cap.total);
+  if(n > 0){
+    const cols = Math.min(cap.cols, n);
+    const rows = Math.ceil(n / cap.cols);
+    const blockW = cols*iw + (cols-1)*gap;
+    const ox = Math.round((pw - blockW)/2);   // canh giữa theo bề ngang
+    const oy = mg;                            // DỒN SÁT LÊN TRÊN
+    const guides = $('#guides').checked;
+    for(let i=0;i<n;i++){
+      const r = Math.floor(i/cap.cols), c = i % cap.cols;
+      const x = ox + c*(iw+gap), y = oy + r*(ih+gap);
+      g.drawImage(S.cropCanvas, x, y, iw, ih);
+      if(guides){
+        g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = gap>0 ? 2 : 1;
+        g.strokeRect(x+0.5, y+0.5, iw-1, ih-1);
+      }
+    }
+  }
+  S.sheetCanvas = sheet;
+  const placed = Math.min(want, cap.total);
+  return {sheet, placed, want, cap:cap.total, left:leftoverCm(placed)};
+}
+
+/* =========================================================
+   VẼ RA MÀN HÌNH
+   ========================================================= */
+function showCanvas(target, source, maxW){
+  const k = Math.min(1, maxW / source.width);
+  target.width = Math.round(source.width*k);
+  target.height = Math.round(source.height*k);
+  const g = target.getContext('2d');
+  g.imageSmoothingQuality='high';
+  g.drawImage(source,0,0,target.width,target.height);
+}
+function rerender(){
+  if(!S.srcCanvas || !$('#result').style.display || $('#result').style.display==='none') { updateCap(); return; }
+  cropPhoto();
+  const info = buildSheet();
+  showCanvas($('#cropPrev'), S.cropCanvas, 420);
+  showCanvas($('#sheetPrev'), S.sheetCanvas, 900);
+  updateCap();
+  if(info.cap === 0){
+    say(`Ảnh ${S.size.label} không vừa tờ ${S.paper.label}. Chọn giấy lớn hơn.`, 'err');
+  }else if(info.placed < info.want){
+    say(`Tờ này chỉ vừa ${info.cap} tấm. Muốn ${info.want} thì in thêm tờ nữa.`, '');
+  }else{
+    const l = info.left;
+    say(`Xong — ${info.placed} tấm.` + (l>=1 ? ` Chừa ${l.toFixed(1)} cm giấy phía dưới.` : ''), 'ok');
+  }
+}
+$('#guides').addEventListener('change', rerender);
+document.querySelectorAll('[data-adj]').forEach(b=>b.addEventListener('click',()=>{
+  const a = b.dataset.adj;
+  if(a==='zoomin')  S.zoom = Math.max(0.6, S.zoom-0.06);
+  if(a==='zoomout') S.zoom = Math.min(2.2, S.zoom+0.06);
+  if(a==='up')    S.dy += 0.035;
+  if(a==='down')  S.dy -= 0.035;
+  if(a==='left')  S.dx += 0.035;
+  if(a==='right') S.dx -= 0.035;
+  rerender();
+}));
+
+/* =========================================================
+   NÚT CHÍNH
+   ========================================================= */
+$('#go').addEventListener('click', async ()=>{
+  if(!S.srcCanvas){ say('Chưa chọn ảnh.', 'err'); return; }
+  const btn = $('#go'); btn.disabled = true; const old = btn.textContent;
+  try{
+    btn.textContent = 'ĐANG TÌM MẶT…';
+    say('Đang tìm khuôn mặt…');
+    S.faceBox = await detectFace(S.srcCanvas);
+    if(!S.faceBox) say('Không thấy mặt — cắt tạm giữa ảnh, chỉnh bằng nút mũi tên.');
+
+    if(S.bg.color){
+      btn.textContent = 'ĐANG TÁCH NỀN…';
+      say('Đang tách nền… chờ 10–40 giây.');
+      try{
+        S.workCanvas = await replaceBackground(S.srcCanvas, S.bg.color, m => say(m));
+      }catch(e){
+        console.warn(e);
+        S.workCanvas = null;
+        say('Tách nền hỏng (' + e.message + '). Đang dùng ảnh gốc — chọn "Giữ nguyên nền" để bỏ qua bước này.', 'err');
+      }
+    }else{
+      S.workCanvas = null;
+    }
+
+    btn.textContent = 'ĐANG GHÉP GIẤY IN…';
+    $('#result').style.display = 'block';
+    rerender();
+    $('#result').scrollIntoView({behavior:'smooth', block:'start'});
+  }catch(e){
+    console.error(e);
+    say('Lỗi: ' + e.message, 'err');
+  }finally{
+    btn.disabled = false; btn.textContent = old;
+  }
+});
+
+/* =========================================================
+   XUẤT FILE
+   ========================================================= */
+/* Canvas xuất JPEG không ghi DPI → Corel/Photoshop hiểu nhầm thành 96 DPI.
+   Hàm này ghi thẳng mật độ 300 DPI vào khối JFIF (APP0) để ảnh vào Corel
+   là đúng cm ngay, khỏi chỉnh tay. */
+async function jpegWithDPI(blob, dpi){
+  const b = new Uint8Array(await blob.arrayBuffer());
+  if(b[0]!==0xFF || b[1]!==0xD8) return blob;                 // không phải JPEG
+  const hi = dpi>>8, lo = dpi&255;
+  const hasJFIF = b[2]===0xFF && b[3]===0xE0 &&
+                  b[6]===0x4A && b[7]===0x46 && b[8]===0x49 && b[9]===0x46;
+  if(hasJFIF){                                                 // sửa tại chỗ
+    b[13]=1; b[14]=hi; b[15]=lo; b[16]=hi; b[17]=lo;           // units=inch, X, Y
+    return new Blob([b], {type:'image/jpeg'});
+  }
+  const app0 = new Uint8Array([                                // chèn khối mới
+    0xFF,0xE0, 0x00,0x10, 0x4A,0x46,0x49,0x46,0x00,
+    0x01,0x01, 0x01, hi,lo, hi,lo, 0x00,0x00
+  ]);
+  const out = new Uint8Array(b.length + app0.length);
+  out.set(b.subarray(0,2), 0);
+  out.set(app0, 2);
+  out.set(b.subarray(2), 2 + app0.length);
+  return new Blob([out], {type:'image/jpeg'});
+}
+
+function download(canvas, name){
+  canvas.toBlob(async b=>{
+    const withDpi = await jpegWithDPI(b, DPI);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(withDpi); a.download = name;
+    a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  }, 'image/jpeg', 0.95);
+}
+$('#dlSheet').onclick = ()=> S.sheetCanvas && download(S.sheetCanvas, `anh-the-${S.size.id}-${S.paper.id}.jpg`);
+$('#dlOne').onclick   = ()=> S.cropCanvas  && download(S.cropCanvas,  `anh-the-${S.size.id}-1tam.jpg`);
+$('#print').onclick = ()=>{
+  if(!S.sheetCanvas) return;
+  const url = S.sheetCanvas.toDataURL('image/jpeg',0.95);
+  const w = window.open('', '_blank');
+  w.document.write(`<!doctype html><html><head><title>In ảnh thẻ</title>
+    <style>@page{size:${S.paper.w}cm ${S.paper.h}cm;margin:0}
+    html,body{margin:0;padding:0}
+    img{width:${S.paper.w}cm;height:${S.paper.h}cm;display:block}</style></head>
+    <body><img src="${url}" onload="window.print()"></body></html>`);
+  w.document.close();
+};
+</script>
+</body>
+</html>

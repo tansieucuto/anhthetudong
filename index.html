@@ -118,7 +118,8 @@ header.top p{margin:6px 0 0;color:#B9C2D0;font-size:17px}
 .previewRow .col{flex:1 1 240px;min-width:220px}
 .previewRow h3{margin:0 0 10px;font-size:18px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
 #cropPrev{max-width:210px;width:100%;border:2px solid var(--line);border-radius:8px;display:block}
-#sheetPrev{max-width:100%;border:2px solid var(--line);border-radius:8px;display:block;background:#fff}
+.sheetCv{max-width:100%;border:2px solid var(--line);border-radius:8px;display:block;background:#fff;margin-bottom:14px}
+.sheetTag{font-size:15px;font-weight:800;color:var(--muted);margin:4px 0 6px}
 .adjust{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:14px;max-width:260px}
 .adjust button{
   min-height:62px;border:3px solid var(--line);border-radius:12px;background:#fff;
@@ -175,7 +176,7 @@ footer{color:var(--muted);font-size:15px;text-align:center;margin-top:26px;line-
   <h2><span class="num">5</span> Số tấm</h2>
   <div class="count">
     <button type="button" id="minus" aria-label="Bớt một tấm">−</button>
-    <input type="number" id="qty" value="8" min="1" max="200" inputmode="numeric">
+    <input type="number" id="qty" value="8" min="1" max="500" step="1" inputmode="numeric">
     <button type="button" id="plus" aria-label="Thêm một tấm">+</button>
     <span class="cap" id="capNote"></span>
   </div>
@@ -208,7 +209,7 @@ footer{color:var(--muted);font-size:15px;text-align:center;margin-top:26px;line-
     </div>
     <div class="col">
       <h3>Cả tờ</h3>
-      <canvas id="sheetPrev"></canvas>
+      <div id="sheetHost"></div>
       <label class="chk"><input type="checkbox" id="guides" checked> Đường cắt</label>
     </div>
   </div>
@@ -268,7 +269,7 @@ const S = {
   faceBox:null,       // {x,y,width,height}
   zoom:1, dx:0, dy:0, // tinh chỉnh khung cắt
   size:SIZES[1], paper:PAPERS[0], bg:BGS[0], gap:GAPS[0],
-  cropCanvas:null, sheetCanvas:null
+  cropCanvas:null, sheetCanvas:null, sheets:[]
 };
 
 /* =========================================================
@@ -342,9 +343,10 @@ function updateCap(){
     : `Không vừa tờ ${S.paper.label}`;
 }
 const qty = $('#qty');
-$('#plus').onclick  = ()=>{ qty.value = Math.min(200, (+qty.value||1)+1); rerender(); };
+$('#plus').onclick  = ()=>{ qty.value = Math.min(500, (+qty.value||1)+1); rerender(); };
 $('#minus').onclick = ()=>{ qty.value = Math.max(1,   (+qty.value||1)-1); rerender(); };
 qty.addEventListener('change', rerender);
+qty.addEventListener('input', rerender);
 updateCap();
 
 /* =========================================================
@@ -432,16 +434,51 @@ async function getMediaPipe(){
   mpSeg = seg; return seg;
 }
 
-/* Mặt nạ của MediaPipe hơi mềm ở rìa tóc → siết ngưỡng cho gọn,
-   rồi làm mượt lại 1 chút để không bị răng cưa. */
-function refineMask(maskData, w, h){
-  const a = maskData;
-  for(let i=0;i<a.length;i+=4){
-    let v = a[i];                       // kênh đỏ = độ tin cậy
-    v = (v-118) * 3.2 + 128;            // tăng tương phản quanh ngưỡng
-    a[i+3] = v<0 ? 0 : v>255 ? 255 : v;
+/* Mặt nạ MediaPipe chỉ 256×256 nên phóng to lên là rìa gãy khúc.
+   Cách xử lý: lấy alpha ra mảng riêng → làm mờ 2 lượt (ngang rồi dọc)
+   → chuyển mềm bằng smoothstep thay vì cắt cứng theo ngưỡng.
+   Giữ lại dải alpha trung gian chính là thứ khử răng cưa. */
+function boxBlurAlpha(a, w, h, r){
+  const tmp = new Float32Array(w*h), out = new Float32Array(w*h);
+  const win = r*2+1;
+  for(let y=0;y<h;y++){                       // ngang
+    let sum=0; const row=y*w;
+    for(let x=-r;x<=r;x++) sum += a[row + Math.min(w-1,Math.max(0,x))];
+    for(let x=0;x<w;x++){
+      tmp[row+x] = sum/win;
+      sum -= a[row + Math.min(w-1,Math.max(0,x-r))];
+      sum += a[row + Math.min(w-1,Math.max(0,x+r+1))];
+    }
   }
-  return maskData;
+  for(let x=0;x<w;x++){                       // dọc
+    let sum=0;
+    for(let y=-r;y<=r;y++) sum += tmp[Math.min(h-1,Math.max(0,y))*w + x];
+    for(let y=0;y<h;y++){
+      out[y*w+x] = sum/win;
+      sum -= tmp[Math.min(h-1,Math.max(0,y-r))*w + x];
+      sum += tmp[Math.min(h-1,Math.max(0,y+r+1))*w + x];
+    }
+  }
+  return out;
+}
+function refineMask(md, w, h){
+  const d = md.data, n = w*h;
+  const a = new Float32Array(n);
+  for(let i=0;i<n;i++) a[i] = d[i*4];         // kênh đỏ = độ tin cậy
+
+  // bán kính mờ theo cỡ ảnh: ảnh càng lớn, rìa cần mượt càng nhiều
+  const r = Math.max(1, Math.round(Math.max(w,h)/500));
+  const b = boxBlurAlpha(a, w, h, r);
+
+  // smoothstep trên dải rộng → rìa chuyển mượt, không gãy bậc thang.
+  // Tâm 140 (>128) để mặt nạ co vào trong 1 chút, tránh viền nền cũ.
+  const lo = 96, hi = 184;
+  for(let i=0;i<n;i++){
+    let t = (b[i]-lo)/(hi-lo);
+    t = t<0 ? 0 : t>1 ? 1 : t;
+    d[i*4+3] = Math.round(t*t*(3-2*t)*255);   // smoothstep
+  }
+  return md;
 }
 
 async function cutWithMediaPipe(srcCanvas){
@@ -455,9 +492,10 @@ async function cutWithMediaPipe(srcCanvas){
 
   const m = document.createElement('canvas'); m.width=w; m.height=h;
   const mg = m.getContext('2d', {willReadFrequently:true});
+  mg.imageSmoothingEnabled = true; mg.imageSmoothingQuality = 'high';
   mg.drawImage(res.segmentationMask, 0, 0, w, h);
   const md = mg.getImageData(0,0,w,h);
-  refineMask(md.data, w, h);
+  refineMask(md, w, h);
   mg.putImageData(md, 0, 0);
 
   const out = document.createElement('canvas'); out.width=w; out.height=h;
@@ -503,6 +541,7 @@ async function replaceBackground(srcCanvas, color, onStep){
   out.width = srcCanvas.width; out.height = srcCanvas.height;
   const g = out.getContext('2d');
   g.fillStyle = color; g.fillRect(0,0,out.width,out.height);
+  g.imageSmoothingQuality = 'high';
   g.drawImage(cut,0,0);
   return out;
 }
@@ -548,7 +587,7 @@ function cropPhoto(){
 /* =========================================================
    GHÉP TỜ GIẤY IN
    ========================================================= */
-function buildSheet(){
+function drawSheet(n, guides){
   const pw = cm2px(S.paper.w), ph = cm2px(S.paper.h);
   const iw = cm2px(S.size.w),  ih = cm2px(S.size.h);
   const gap = cm2px(S.gap.cm), mg = cm2px(MARGIN_CM);
@@ -557,30 +596,43 @@ function buildSheet(){
   const sheet = document.createElement('canvas');
   sheet.width = pw; sheet.height = ph;
   const g = sheet.getContext('2d');
-  g.fillStyle = '#FFFFFF'; g.fillRect(0,0,pw,ph);   // viền trắng để cắt
+  g.fillStyle = '#FFFFFF'; g.fillRect(0,0,pw,ph);
+  g.imageSmoothingQuality = 'high';
 
-  const want = Math.max(1, Math.min(200, +qty.value||1));
-  const n = Math.min(want, cap.total);
-  if(n > 0){
-    const cols = Math.min(cap.cols, n);
-    const rows = Math.ceil(n / cap.cols);
-    const blockW = cols*iw + (cols-1)*gap;
-    const ox = Math.round((pw - blockW)/2);   // canh giữa theo bề ngang
-    const oy = mg;                            // DỒN SÁT LÊN TRÊN
-    const guides = $('#guides').checked;
-    for(let i=0;i<n;i++){
-      const r = Math.floor(i/cap.cols), c = i % cap.cols;
-      const x = ox + c*(iw+gap), y = oy + r*(ih+gap);
-      g.drawImage(S.cropCanvas, x, y, iw, ih);
-      if(guides){
-        g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = gap>0 ? 2 : 1;
-        g.strokeRect(x+0.5, y+0.5, iw-1, ih-1);
-      }
+  const cols = Math.min(cap.cols, n);
+  const blockW = cols*iw + (cols-1)*gap;
+  const ox = Math.round((pw - blockW)/2);   // canh giữa theo bề ngang
+  const oy = mg;                            // dồn sát lên trên
+  for(let i=0;i<n;i++){
+    const r = Math.floor(i/cap.cols), c = i % cap.cols;
+    const x = ox + c*(iw+gap), y = oy + r*(ih+gap);
+    g.drawImage(S.cropCanvas, x, y, iw, ih);
+    if(guides){
+      g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = gap>0 ? 2 : 1;
+      g.strokeRect(x+0.5, y+0.5, iw-1, ih-1);
     }
   }
-  S.sheetCanvas = sheet;
-  const placed = Math.min(want, cap.total);
-  return {sheet, placed, want, cap:cap.total, left:leftoverCm(placed)};
+  return sheet;
+}
+
+/* Số tấm tuỳ ý: vượt sức chứa một tờ thì tự chia thành nhiều tờ.
+   Tờ cuối nhận phần lẻ, nên phần giấy thừa gom hết vào tờ cuối. */
+function buildSheets(){
+  const cap = capacity();
+  const want = Math.max(1, Math.min(500, Math.round(+qty.value||1)));
+  S.sheets = [];
+  if(cap.total === 0) return {sheets:[], want, cap:0, left:0};
+
+  const guides = $('#guides').checked;
+  let remain = want;
+  while(remain > 0){
+    const n = Math.min(remain, cap.total);
+    S.sheets.push(drawSheet(n, guides));
+    remain -= n;
+  }
+  const lastN = want - cap.total*(S.sheets.length-1);
+  S.sheetCanvas = S.sheets[0];
+  return {sheets:S.sheets, want, cap:cap.total, left:leftoverCm(lastN), lastN};
 }
 
 /* =========================================================
@@ -597,17 +649,31 @@ function showCanvas(target, source, maxW){
 function rerender(){
   if(!S.srcCanvas || !$('#result').style.display || $('#result').style.display==='none') { updateCap(); return; }
   cropPhoto();
-  const info = buildSheet();
+  const info = buildSheets();
   showCanvas($('#cropPrev'), S.cropCanvas, 420);
-  showCanvas($('#sheetPrev'), S.sheetCanvas, 900);
+
+  const host = $('#sheetHost'); host.innerHTML = '';
+  info.sheets.forEach((sh,i)=>{
+    if(info.sheets.length > 1){
+      const t = document.createElement('div');
+      t.className = 'sheetTag'; t.textContent = `Tờ ${i+1}/${info.sheets.length}`;
+      host.appendChild(t);
+    }
+    const cv = document.createElement('canvas');
+    cv.className = 'sheetCv';
+    host.appendChild(cv);
+    showCanvas(cv, sh, 900);
+  });
+
   updateCap();
+  const l = info.left;
+  const leftTxt = l >= 1 ? ` Tờ cuối chừa ${l.toFixed(1)} cm giấy phía dưới.` : '';
   if(info.cap === 0){
     say(`Ảnh ${S.size.label} không vừa tờ ${S.paper.label}. Chọn giấy lớn hơn.`, 'err');
-  }else if(info.placed < info.want){
-    say(`Tờ này chỉ vừa ${info.cap} tấm. Muốn ${info.want} thì in thêm tờ nữa.`, '');
+  }else if(info.sheets.length > 1){
+    say(`Xong — ${info.want} tấm, chia ${info.sheets.length} tờ.` + leftTxt, 'ok');
   }else{
-    const l = info.left;
-    say(`Xong — ${info.placed} tấm.` + (l>=1 ? ` Chừa ${l.toFixed(1)} cm giấy phía dưới.` : ''), 'ok');
+    say(`Xong — ${info.want} tấm.` + leftTxt, 'ok');
   }
 }
 $('#guides').addEventListener('change', rerender);
@@ -695,17 +761,25 @@ function download(canvas, name){
     a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
   }, 'image/jpeg', 0.95);
 }
-$('#dlSheet').onclick = ()=> S.sheetCanvas && download(S.sheetCanvas, `anh-the-${S.size.id}-${S.paper.id}.jpg`);
+$('#dlSheet').onclick = ()=>{
+  if(!S.sheets || !S.sheets.length) return;
+  S.sheets.forEach((sh,i)=>setTimeout(()=>{
+    const tag = S.sheets.length>1 ? `-to${i+1}` : '';
+    download(sh, `anh-the-${S.size.id}-${S.paper.id}${tag}.jpg`);
+  }, i*700));
+};
 $('#dlOne').onclick   = ()=> S.cropCanvas  && download(S.cropCanvas,  `anh-the-${S.size.id}-1tam.jpg`);
 $('#print').onclick = ()=>{
-  if(!S.sheetCanvas) return;
-  const url = S.sheetCanvas.toDataURL('image/jpeg',0.95);
+  if(!S.sheets || !S.sheets.length) return;
+  const imgs = S.sheets.map(sh =>
+    `<img src="${sh.toDataURL('image/jpeg',0.95)}">`).join('');
   const w = window.open('', '_blank');
   w.document.write(`<!doctype html><html><head><title>In ảnh thẻ</title>
     <style>@page{size:${S.paper.w}cm ${S.paper.h}cm;margin:0}
     html,body{margin:0;padding:0}
-    img{width:${S.paper.w}cm;height:${S.paper.h}cm;display:block}</style></head>
-    <body><img src="${url}" onload="window.print()"></body></html>`);
+    img{width:${S.paper.w}cm;height:${S.paper.h}cm;display:block;page-break-after:always}
+    img:last-child{page-break-after:auto}</style></head>
+    <body>${imgs}<script>window.onload=()=>window.print()<\/script></body></html>`);
   w.document.close();
 };
 </script>

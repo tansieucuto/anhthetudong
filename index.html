@@ -429,7 +429,7 @@ async function getMediaPipe(){
   if(mpSeg) return mpSeg;
   if(!window.SelfieSegmentation) await loadScript(MP_BASE + '/selfie_segmentation.js');
   const seg = new SelfieSegmentation({locateFile:f => MP_BASE + '/' + f});
-  seg.setOptions({modelSelection:1});          // 1 = model chính xác hơn
+  seg.setOptions({modelSelection:0});          // 0 = model vuông 256×256 (1 là bản 144×256, thấp hơn)
   await seg.initialize();
   mpSeg = seg; return seg;
 }
@@ -438,10 +438,10 @@ async function getMediaPipe(){
    Cách xử lý: lấy alpha ra mảng riêng → làm mờ 2 lượt (ngang rồi dọc)
    → chuyển mềm bằng smoothstep thay vì cắt cứng theo ngưỡng.
    Giữ lại dải alpha trung gian chính là thứ khử răng cưa. */
-function boxBlurAlpha(a, w, h, r){
+function boxBlur(a, w, h, r){
   const tmp = new Float32Array(w*h), out = new Float32Array(w*h);
   const win = r*2+1;
-  for(let y=0;y<h;y++){                       // ngang
+  for(let y=0;y<h;y++){
     let sum=0; const row=y*w;
     for(let x=-r;x<=r;x++) sum += a[row + Math.min(w-1,Math.max(0,x))];
     for(let x=0;x<w;x++){
@@ -450,7 +450,7 @@ function boxBlurAlpha(a, w, h, r){
       sum += a[row + Math.min(w-1,Math.max(0,x+r+1))];
     }
   }
-  for(let x=0;x<w;x++){                       // dọc
+  for(let x=0;x<w;x++){
     let sum=0;
     for(let y=-r;y<=r;y++) sum += tmp[Math.min(h-1,Math.max(0,y))*w + x];
     for(let y=0;y<h;y++){
@@ -461,22 +461,55 @@ function boxBlurAlpha(a, w, h, r){
   }
   return out;
 }
-function refineMask(md, w, h){
-  const d = md.data, n = w*h;
-  const a = new Float32Array(n);
-  for(let i=0;i<n;i++) a[i] = d[i*4];         // kênh đỏ = độ tin cậy
 
-  // bán kính mờ theo cỡ ảnh: ảnh càng lớn, rìa cần mượt càng nhiều
-  const r = Math.max(1, Math.round(Math.max(w,h)/500));
-  const b = boxBlurAlpha(a, w, h, r);
+/* Guided filter (He, Sun, Tang 2010).
+   Làm mờ thì rìa mềm nhưng vẫn lượn sóng theo bậc thang cũ.
+   Guided filter khác ở chỗ nó kéo mặt nạ BÁM VÀO cạnh thật của ảnh gốc:
+   chỗ nào ảnh có ranh giới tóc/vai thì alpha cắt đúng đó, chỗ phẳng thì mượt.
+   Đây mới là thứ xoá được răng cưa do model 256px sinh ra. */
+function guidedFilter(I, p, w, h, r, eps){
+  const n = w*h;
+  const Ip = new Float32Array(n), II = new Float32Array(n);
+  for(let i=0;i<n;i++){ Ip[i] = I[i]*p[i]; II[i] = I[i]*I[i]; }
 
-  // smoothstep trên dải rộng → rìa chuyển mượt, không gãy bậc thang.
-  // Tâm 140 (>128) để mặt nạ co vào trong 1 chút, tránh viền nền cũ.
-  const lo = 96, hi = 184;
+  const mI  = boxBlur(I,  w,h,r), mP  = boxBlur(p,  w,h,r);
+  const mIp = boxBlur(Ip, w,h,r), mII = boxBlur(II, w,h,r);
+
+  const A = new Float32Array(n), B = new Float32Array(n);
   for(let i=0;i<n;i++){
-    let t = (b[i]-lo)/(hi-lo);
+    const varI = mII[i] - mI[i]*mI[i];
+    const cov  = mIp[i] - mI[i]*mP[i];
+    A[i] = cov / (varI + eps);
+    B[i] = mP[i] - A[i]*mI[i];
+  }
+  const mA = boxBlur(A, w,h,r), mB = boxBlur(B, w,h,r);
+
+  const q = new Float32Array(n);
+  for(let i=0;i<n;i++) q[i] = mA[i]*I[i] + mB[i];
+  return q;
+}
+
+/* Tinh mặt nạ: dùng chính ảnh gốc làm bản đồ dẫn đường. */
+function refineMask(md, srcData, w, h){
+  const d = md.data, src = srcData.data, n = w*h;
+
+  const I = new Float32Array(n), p = new Float32Array(n);
+  for(let i=0;i<n;i++){
+    const k = i*4;
+    I[i] = (src[k]*0.299 + src[k+1]*0.587 + src[k+2]*0.114) / 255;  // xám
+    p[i] = d[k] / 255;                                              // mặt nạ thô
+  }
+
+  const r = Math.max(4, Math.round(Math.max(w,h)/110));
+  let q = guidedFilter(I, p, w, h, r, 1e-4);
+  q = guidedFilter(I, q, w, h, Math.max(2, r>>1), 4e-5);  // lượt 2 cho rìa tóc
+
+  // ép nhẹ về 0/1 nhưng vẫn giữ dải chuyển tiếp ~1px để khỏi cưa lại
+  const lo = 0.42, hi = 0.60;
+  for(let i=0;i<n;i++){
+    let t = (q[i]-lo)/(hi-lo);
     t = t<0 ? 0 : t>1 ? 1 : t;
-    d[i*4+3] = Math.round(t*t*(3-2*t)*255);   // smoothstep
+    d[i*4+3] = Math.round(t*t*(3-2*t)*255);
   }
   return md;
 }
@@ -494,8 +527,10 @@ async function cutWithMediaPipe(srcCanvas){
   const mg = m.getContext('2d', {willReadFrequently:true});
   mg.imageSmoothingEnabled = true; mg.imageSmoothingQuality = 'high';
   mg.drawImage(res.segmentationMask, 0, 0, w, h);
+  const sg = srcCanvas.getContext('2d', {willReadFrequently:true});
+  const srcData = sg.getImageData(0,0,w,h);
   const md = mg.getImageData(0,0,w,h);
-  refineMask(md, w, h);
+  refineMask(md, srcData, w, h);
   mg.putImageData(md, 0, 0);
 
   const out = document.createElement('canvas'); out.width=w; out.height=h;
